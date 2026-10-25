@@ -1,0 +1,89 @@
+<!doctype html><html><head><meta charset="utf-8"><title>JobPilot Demo</title>
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1280px;height:720px;overflow:hidden;background:#0f172a;color:#e2e8f0;font-family:system-ui,Segoe UI,Arial,sans-serif}
+.scene{position:absolute;inset:0;padding:48px 70px;opacity:0;transition:opacity .5s}
+.scene.on{opacity:1}
+h1{font-size:46px;margin-bottom:8px}h2{font-size:34px;margin-bottom:6px;color:#38bdf8}
+.sub{font-size:21px;color:#94a3b8;margin-bottom:26px}
+.tag{display:inline-block;background:#1e293b;border:1px solid #334155;border-radius:20px;padding:6px 16px;font-size:16px;margin-right:8px;color:#a5b4fc}
+.card{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:16px 20px;margin-bottom:12px;font-size:20px;display:flex;justify-content:space-between;align-items:center}
+.pop{opacity:0;transform:translateY(20px);animation:pop .6s forwards}
+@keyframes pop{to{opacity:1;transform:none}}
+.score{font-weight:700;border-radius:8px;padding:4px 12px;font-size:18px}
+.g{background:#14532d;color:#86efac}.y{background:#713f12;color:#fde68a}.r{background:#7f1d1d;color:#fca5a5;text-decoration:line-through}
+.btn{background:#22c55e;color:#052e16;font-weight:700;border-radius:12px;padding:16px 40px;font-size:26px;display:inline-block;animation:pulse 1s infinite}
+@keyframes pulse{50%{transform:scale(1.07)}}
+.bar{height:14px;background:#334155;border-radius:8px;overflow:hidden;margin:10px 0}
+.bar i{display:block;height:100%;width:0;background:#38bdf8;animation:fill 4s forwards}
+@keyframes fill{to{width:100%}}
+.cols{display:flex;gap:30px}.cols>div{flex:1}
+.cv{background:#f8fafc;color:#0f172a;border-radius:10px;padding:22px;font-size:18px;line-height:1.5;height:380px}
+.hl{background:#fde68a;padding:0 4px;border-radius:4px}
+.fld{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:19px;display:flex;justify-content:space-between}
+.fld b{color:#22c55e;opacity:0;animation:pop .4s forwards}
+.cap{position:absolute;bottom:34px;left:70px;right:70px;font-size:24px;background:#020617cc;padding:14px 22px;border-radius:12px;border-left:6px solid #38bdf8}
+.big{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;height:100%}
+.note{position:absolute;top:18px;right:30px;font-size:14px;color:#64748b}
+</style></head><body>
+<div class="note">Dummy demo • sample data</div>
+
+<div class="scene" data-d="5"><div class="big"><h1>🚀 JobPilot</h1><div class="sub" style="font-size:28px">Roz ka job-search ka jhanjhat khatam</div>
+<div><span class="tag">Ek profile</span><span class="tag">Sahi jobs</span><span class="tag">Apna CV</span><span class="tag">Ek tap apply</span></div></div></div>
+
+<div class="scene" data-d="6"><h2>Pehle: roz ki pareshani 😩</h2><div class="sub">Har din yahi chakkar</div>
+<div class="card pop" style="animation-delay:.3s">Naukri kholo → 40 jobs, 35 irrelevant<span class="score r">time waste</span></div>
+<div class="card pop" style="animation-delay:1.3s">LinkedIn kholo → wahi jobs dobara<span class="score r">duplicate</span></div>
+<div class="card pop" style="animation-delay:2.3s">Har job ke liye CV badlo (30 min)<span class="score r">thakaan</span></div>
+<div class="card pop" style="animation-delay:3.3s">Har form mein wahi details dobara<span class="score r">boring</span></div>
+<div class="cap">Ek din mein 2-3 ghante sirf dhundhne aur bharne mein.</div></div>
+
+<div class="scene" data-d="7"><h2>Step 1: Profile ek baar, 2 minute mein</h2><div class="sub">CV upload karo, hum skills aur experience nikaal lete hain</div>
+<div class="cols"><div><div class="fld pop" style="animation-delay:.4s">Naam<span>Rahul Sharma</span></div><div class="fld pop" style="animation-delay:.9s">Experience<span>3 saal</span></div>
+<div class="fld pop" style="animation-delay:1.4s">Skills<span>React, JS, SQL</span></div><div class="fld pop" style="animation-delay:1.9s">Location<span>Delhi / Remote</span></div>
+<div class="fld pop" style="animation-delay:2.4s">Notice period<span>30 din</span></div></div>
+<div><div class="sub">Aapki permission se (kabhi bhi hata sakte ho):</div><div class="card pop" style="animation-delay:3s">✅ Gmail job-alerts (sirf padhna)</div><div class="card pop" style="animation-delay:3.6s">✅ Public company job feeds</div><div class="card pop" style="animation-delay:4.2s">🚫 Koi password store nahi</div></div></div>
+<div class="cap">Aapka data, aapka control. Consent ke saath.</div></div>
+
+<div class="scene" data-d="7"><h2>Step 2: Saari jobs ek jagah</h2><div class="sub">Alerts + company feeds, duplicate hata kar</div>
+<div class="bar"><i></i></div>
+<div class="cols"><div><div class="card pop" style="animation-delay:.5s">📧 Naukri alert emails<span class="tag">12 jobs</span></div><div class="card pop" style="animation-delay:1s">📧 LinkedIn alert emails<span class="tag">18 jobs</span></div>
+<div class="card pop" style="animation-delay:1.5s">🏢 Greenhouse / Lever feeds<span class="tag">25 jobs</span></div><div class="card pop" style="animation-delay:2s">🌐 Company career pages<span class="tag">9 jobs</span></div></div>
+<div><div class="card pop" style="animation-delay:3s;font-size:26px">64 jobs mili<span></span></div><div class="card pop" style="animation-delay:3.8s;font-size:26px">22 duplicate hataye<span class="score r">−22</span></div><div class="card pop" style="animation-delay:4.6s;font-size:26px">42 unique jobs<span class="score g">✔</span></div></div></div>
+<div class="cap">Ab 5 portals kholne ki zarurat nahi.</div></div>
+
+<div class="scene" data-d="7"><h2>Step 3: Sirf sahi match dikhte hain</h2><div class="sub">Location, salary, experience filter + skill match score</div>
+<div class="card pop" style="animation-delay:.4s"><span>Frontend Dev – Zomato, Gurgaon<br><small style="color:#94a3b8">Match: React ✔ JS ✔ • Missing: TypeScript (seekh sakte ho)</small></span><span class="score g">92%</span></div>
+<div class="card pop" style="animation-delay:1.3s"><span>React Engineer – Razorpay, Remote<br><small style="color:#94a3b8">Match: React ✔ SQL ✔ • Salary ✔</small></span><span class="score g">88%</span></div>
+<div class="card pop" style="animation-delay:2.2s"><span>UI Developer – Startup, Pune<br><small style="color:#94a3b8">Match: React ✔ • Missing: Figma</small></span><span class="score y">71%</span></div>
+<div class="card pop" style="animation-delay:3.1s"><span>Java Backend – Bank, Mumbai<br><small style="color:#94a3b8">Skills mismatch • location mismatch</small></span><span class="score r">31%</span></div>
+<div class="cap">Har match ke saath "kyun match hua" bhi dikhta hai.</div></div>
+
+<div class="scene" data-d="8"><h2>Step 4: Har job ke liye alag CV, seconds mein</h2><div class="sub">Sirf aapki asli details reorder aur rephrase hoti hain, kuch nakli nahi</div>
+<div class="cols"><div><div class="sub">Pehle (general CV)</div><div class="cv">Rahul Sharma<br>Web developer, 3 saal.<br>• Websites banayi<br>• Team ke saath kaam<br>• Skills: HTML, SQL, React, JS</div></div>
+<div><div class="sub">Zomato ke liye (tailored)</div><div class="cv pop" style="animation-delay:1s">Rahul Sharma<br><span class="hl">Frontend Developer – React</span>, 3 saal.<br>• <span class="hl">React</span> mein 5 production web apps<br>• <span class="hl">Performance</span> sudhaar kar load time kam kiya<br>• Skills: <span class="hl">React, JS</span>, SQL</div></div></div>
+<div class="cap">Peele hisse = badlav. Aap diff dekh kar approve karte ho.</div></div>
+
+<div class="scene" data-d="8"><h2>Step 5: Apply, ek tap ya ek check</h2>
+<div class="cols"><div><div class="sub">Jahan direct apply possible</div><div class="card pop" style="animation-delay:.4s">Razorpay (Greenhouse)</div><div style="margin-top:30px" class="pop"><span class="btn">⚡ One-Tap Apply</span></div><div class="pop" style="animation-delay:3s;margin-top:24px;font-size:24px;color:#86efac">✅ Applied! CV + details bhej diye</div></div>
+<div><div class="sub">Jahan form bharna padta hai → Autofill</div><div class="fld pop" style="animation-delay:.6s">Naam<b style="animation-delay:1s">✔ Rahul Sharma</b></div><div class="fld pop" style="animation-delay:.9s">Email<b style="animation-delay:1.5s">✔ rahul@mail.com</b></div>
+<div class="fld pop" style="animation-delay:1.2s">Experience<b style="animation-delay:2s">✔ 3 saal</b></div><div class="fld pop" style="animation-delay:1.5s">Expected CTC<b style="animation-delay:2.5s;color:#fde68a">⚠ Aap confirm karo</b></div>
+<div style="margin-top:14px" class="pop"><span class="tag">Aap check karke Submit dabate ho</span></div></div></div>
+<div class="cap">Bot nahi, aapka apna assistant. Aap ke click par hi submit hota hai.</div></div>
+
+<div class="scene" data-d="6"><h2>Step 6: Sab kuch track hota hai</h2><div class="sub">Aaj ka kaam: 5 minute</div>
+<div class="card pop" style="animation-delay:.4s">Zomato – Applied<span class="tag">Kal follow-up reminder</span></div>
+<div class="card pop" style="animation-delay:1s">Razorpay – Applied<span class="tag">Waiting</span></div>
+<div class="card pop" style="animation-delay:1.6s">Startup UI – Saved<span class="tag">Kal tak apply karo</span></div>
+<div class="card pop" style="animation-delay:2.2s">🔔 Nayi 92% job abhi aayi – Notification<span class="score g">NEW</span></div>
+<div class="cap">Raat mein aayi job subah sabse pehle aapko dikhegi.</div></div>
+
+<div class="scene" data-d="6"><div class="big"><h1>Pehle: 2-3 ghante ⏳</h1><h1 style="color:#22c55e">Ab: 5 minute ✅</h1>
+<div class="sub" style="margin-top:20px">Koi violation nahi • Aapki permission • Aapka data aapke control mein</div><div class="tag">Dummy demo – asli product Phase 1 se shuru</div></div></div>
+
+<script>
+const sc=[...document.querySelectorAll('.scene')];let i=0;
+function show(){sc.forEach((s,k)=>s.classList.toggle('on',k===i));
+ if(i<sc.length-1){setTimeout(()=>{i++;show()},sc[i].dataset.d*1000)}else{window.done=true}}
+window.start=()=>show();
+</script></body></html>
