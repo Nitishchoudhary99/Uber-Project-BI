@@ -9,7 +9,7 @@ built so that nothing depends on breaking a portal's terms of service.
 cd jobpilot
 pip install -r requirements.txt
 python -m uvicorn app.main:app --port 8000      # open http://localhost:8000
-python -m pytest -q                              # 17 tests
+python -m pytest -q                              # 27 tests
 NODE_PATH=$(npm root -g) node extension/test_filler.js   # autofill check (needs playwright)
 ```
 `JOBPILOT_DB` sets the SQLite path (default `data/jobpilot.db`).
@@ -21,7 +21,7 @@ Try it in 2 minutes: sign up → Profile → upload a CV → Sources & Consent �
 | Stage | What it does | Code |
 |---|---|---|
 | Profile | Parses a PDF/DOCX/TXT CV into a structured "fact bank" the user reviews | `app/resume.py` |
-| Capture | Greenhouse / Lever / Ashby public boards, career pages with schema.org `JobPosting`, uploaded job-alert emails (`.eml` from Naukri, LinkedIn, Indeed, Foundit...), sample data | `app/ingest/` |
+| Capture | Greenhouse / Lever / Ashby public boards, career pages with schema.org `JobPosting`, **Gmail auto-import of job-alert emails** (page `/gmail`, setup in `docs/GMAIL_SETUP.md`), manual `.eml` upload, sample data | `app/ingest/` |
 | De-dupe | Same job on several portals becomes one listing (company + title + city fingerprint) | `app/normalize.py`, `app/store.py` |
 | Match | Hard filters (city/remote, experience, salary floor, excluded companies) then an explainable score: skills 55, wording 20, role 15, experience 10 | `app/matching.py` |
 | Analyse | Market view (demand, cities, freshness, pay) and personal view (skill gaps that unlock the most jobs, funnel, response rate) | `app/analytics.py` |
@@ -42,14 +42,14 @@ Try it in 2 minutes: sign up → Profile → upload a CV → Sources & Consent �
 - Resume parsing is heuristic; scanned PDFs are not supported (no OCR). Always review the parsed profile.
 - Alert emails carry titles only, so skills for those jobs come from the title.
 - No rate limiting / brute-force protection on login, no email verification or password reset, SQLite single-node. Add before launch.
-- Gmail/Outlook OAuth auto-import is not built yet (manual `.eml` upload today).
+- Gmail import is tested against mocked Google endpoints only (no real Google account was available in the build sandbox). Do one real end-to-end connect with your own account first. `gmail.readonly` needs Google verification before public launch (see `docs/GMAIL_SETUP.md`). Outlook is not built.
 - HTTPS and a production secret/session policy are the deployer's job.
 - DPDP: the controls exist (consent, export, delete) but this is not legal advice; get a compliance review before launch.
 - Outbound fetching resolves DNS locally for SSRF protection; behind a proxy-only network it will report "Cannot resolve".
 
 ## Roadmap
-1. Gmail/Outlook OAuth (read-only, label-scoped) for hands-free alert ingestion
-2. Scheduled refresh + email/push digest
+1. Outlook import; Google verification for public launch
+2. Email/push digest
 3. Optional LLM rephrasing inside the verifier's guardrails
 4. Employer/ATS apply APIs and partner programs (LinkedIn, Naukri, Indeed) for true one-tap
 5. Mobile app, Hindi/regional UI

@@ -5,17 +5,37 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import analytics, auth, cvgen, db as dbm, matching, resume
 from .db import audit, db, jload
-from .ingest import ats, email_alerts, jsonld, net, sample
+from .ingest import ats, email_alerts, gmail, jsonld, net, sample
 from .skills import extract_skills, pretty_map
 from .store import upsert_jobs
 
-app = FastAPI(title="JobPilot", version="0.1.0")
+import asyncio
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    """Background auto-import. GMAIL_SYNC_MINUTES=0 turns it off."""
+    minutes = int(os.environ.get("GMAIL_SYNC_MINUTES", "60"))
+    task = None
+    if minutes > 0 and gmail.configured():
+        async def loop():
+            while True:
+                await asyncio.sleep(minutes * 60)
+                await asyncio.to_thread(gmail.auto_sync_all, _has_consent)
+        task = asyncio.create_task(loop())
+    yield
+    if task:
+        task.cancel()
+
+
+app = FastAPI(title="JobPilot", version="0.2.0", lifespan=lifespan)
 dbm.init()
 STATIC = os.path.join(os.path.dirname(__file__), "..", "static")
 MAX_UPLOAD = 5_000_000
@@ -183,6 +203,8 @@ def set_consent(body: ConsentIn, uid: int = Depends(auth.current_user)):
     with db() as c:
         c.execute("INSERT INTO consents(user_id,scope,granted) VALUES(?,?,?)", (uid, body.scope, int(body.granted)))
         audit(c, uid, "consent_granted" if body.granted else "consent_revoked", body.scope)
+    if body.scope == "email_alerts" and not body.granted:
+        gmail.disconnect(uid)  # withdrawing consent must also drop the live Gmail connection
     return consents(uid)
 
 
@@ -206,8 +228,12 @@ def export(uid: int = Depends(auth.current_user)):
 
 @app.delete("/api/account")
 def delete_account(uid: int = Depends(auth.current_user)):
+    try:
+        gmail.disconnect(uid)  # revoke at Google and delete the stored token
+    except Exception:
+        pass
     with db() as c:
-        for t in ("applications", "feedback", "consents", "profiles", "sessions", "watch_sources"):
+        for t in ("applications", "feedback", "consents", "profiles", "sessions", "watch_sources", "gmail_accounts", "gmail_seen", "oauth_states"):
             c.execute(f"DELETE FROM {t} WHERE user_id=?", (uid,))
         c.execute("DELETE FROM job_owners WHERE user_id=?", (uid,))
         c.execute("DELETE FROM jobs WHERE added_by IS NOT NULL AND id NOT IN (SELECT job_id FROM job_owners)")
@@ -462,6 +488,67 @@ def autofill(uid: int = Depends(auth.autofill_user)):
 @app.get("/api/meta")
 def meta():
     return {"statuses": STATUSES, "scopes": SCOPES, "connectors": list(ats.CONNECTORS) + ["career_page"], "pretty": pretty_map()}
+
+
+# ---------- Gmail auto-import ----------
+class AutoIn(BaseModel):
+    enabled: bool
+
+
+def _gmail_call(fn, *a):
+    try:
+        return fn(*a)
+    except gmail.GmailError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/gmail/status")
+def gmail_status(uid: int = Depends(auth.current_user)):
+    with db() as c:
+        row = c.execute("SELECT email, connected_at, last_sync, last_added, last_error, auto_sync FROM gmail_accounts WHERE user_id=?", (uid,)).fetchone()
+    return {"configured": gmail.configured(), "consent": _has_consent(uid, "email_alerts"), "connected": bool(row), "account": dict(row) if row else None,
+            "reads_only_from": gmail.ALERT_SENDERS, "query": gmail.ALERT_QUERY.format(days=14), "redirect_uri": gmail.config()["redirect_uri"]}
+
+
+@app.post("/api/gmail/connect")
+def gmail_connect(uid: int = Depends(auth.current_user)):
+    _need(uid, "email_alerts")
+    return {"url": _gmail_call(gmail.start_auth, uid)}
+
+
+@app.get("/gmail/callback")
+def gmail_callback(code: str = "", state: str = "", error: str = ""):
+    if error or not code or not state:
+        return RedirectResponse("/gmail?error=" + quote("Gmail connection was cancelled."))
+    try:
+        gmail.finish_auth(state, code)
+    except gmail.GmailError as e:
+        return RedirectResponse("/gmail?error=" + quote(str(e)))
+    return RedirectResponse("/gmail?connected=1")
+
+
+@app.post("/api/gmail/sync")
+def gmail_sync(uid: int = Depends(auth.current_user)):
+    _need(uid, "email_alerts")
+    return _gmail_call(gmail.sync, uid)
+
+
+@app.post("/api/gmail/auto")
+def gmail_auto(body: AutoIn, uid: int = Depends(auth.current_user)):
+    with db() as c:
+        c.execute("UPDATE gmail_accounts SET auto_sync=? WHERE user_id=?", (int(body.enabled), uid))
+        audit(c, uid, "gmail_auto_sync", str(body.enabled))
+    return {"auto_sync": body.enabled}
+
+
+@app.post("/api/gmail/disconnect")
+def gmail_disconnect(uid: int = Depends(auth.current_user)):
+    return {"disconnected": True, "revoked_at_google": gmail.disconnect(uid)}
+
+
+@app.get("/gmail")
+def gmail_page():
+    return FileResponse(os.path.join(STATIC, "gmail.html"))
 
 
 @app.get("/")

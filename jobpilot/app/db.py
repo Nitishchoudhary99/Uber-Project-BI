@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS applications(
 CREATE TABLE IF NOT EXISTS feedback(
   user_id INTEGER, job_id INTEGER, signal TEXT, at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id, job_id));
 CREATE TABLE IF NOT EXISTS job_owners(job_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY(job_id,user_id));
+CREATE TABLE IF NOT EXISTS gmail_accounts(
+  user_id INTEGER PRIMARY KEY, email TEXT, refresh_enc TEXT NOT NULL, connected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_sync TEXT, last_added INTEGER, last_error TEXT, auto_sync INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS gmail_seen(user_id INTEGER NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(user_id,msg_id));
+CREATE TABLE IF NOT EXISTS oauth_states(
+  state TEXT PRIMARY KEY, user_id INTEGER NOT NULL, verifier TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS watch_sources(
   id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL,
   last_run TEXT, last_count INTEGER, UNIQUE(user_id, kind, ref));
