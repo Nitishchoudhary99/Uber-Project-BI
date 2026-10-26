@@ -36,3 +36,10 @@ Open `/gmail` → allow "read job-alert emails" → *Connect Gmail* → approve 
 - Stores the extracted job fields only, never email text. Imported jobs are private to the user.
 - Disconnecting (or withdrawing the "alert emails" permission, or deleting the account) revokes the token at Google and deletes our copy.
 - Google cannot restrict OAuth to specific senders, so the sender limit is enforced by our query, not by Google.
+
+## Reusing an existing Google Cloud project (e.g. another app of yours)
+Allowed, but do it this way:
+- Create a **new OAuth client ID** (Web application) for JobPilot inside that project. Do not reuse the other app's client ID/secret: a shared secret means a leak in one app exposes both.
+- Enable the **Gmail API** in that project and register JobPilot's exact redirect URI on the new client.
+- The **OAuth consent screen is shared by the whole project.** Adding `gmail.readonly` (a restricted scope) puts it on that screen for every app in the project, shows the project's app name to JobPilot users, and moves the project's verification burden (Google review + security assessment) onto the other app too.
+  If the other app is in production or has real users, use a separate Google Cloud project for JobPilot instead.
