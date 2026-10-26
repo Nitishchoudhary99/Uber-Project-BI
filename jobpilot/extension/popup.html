@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8">
+<style>body{font:14px system-ui;width:320px;padding:12px}input{width:100%;margin:4px 0 10px;padding:6px;box-sizing:border-box}button{padding:8px 12px;width:100%;margin-top:6px;cursor:pointer}#msg{margin-top:10px;font-size:13px;white-space:pre-wrap}small{color:#555}</style>
+<h3 style="margin:0 0 6px">🚀 JobPilot Autofill</h3>
+<small>Fills the form on this page. You review everything and press Submit yourself.</small>
+<div id="setup"><label>Server<input id="server" placeholder="https://your-jobpilot-url"></label>
+<label>Extension code<input id="code" type="password" placeholder="from JobPilot → Sources → Browser extension"></label>
+<button id="save">Save connection</button></div>
+<button id="fill" style="background:#2563eb;color:#fff;border:0;border-radius:6px">Fill this form</button>
+<div id="msg"></div><script src="popup.js"></script>
