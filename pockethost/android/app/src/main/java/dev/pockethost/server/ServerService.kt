@@ -93,7 +93,8 @@ class ServerService : Service() {
         val home = File(filesDir, "home").apply { mkdirs() }
         val models = modelsDir(this).apply { mkdirs() }
         val tmp = File(cacheDir, "tmp").apply { mkdirs() }
-        val baseEnv = mapOf("HOME" to home.path, "TMPDIR" to tmp.path)
+        // LD_LIBRARY_PATH: the engines load libc++_shared.so bundled next to them.
+        val baseEnv = mapOf("HOME" to home.path, "TMPDIR" to tmp.path, "LD_LIBRARY_PATH" to bin)
 
         // 1. Gateway
         try {

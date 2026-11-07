@@ -61,6 +61,10 @@ fetch cloudflare/cloudflared "$CLOUDFLARED_VERSION" "$WORK/cloudflared"
     -o "$OUT/libcloudflared.so" ./cmd/cloudflared
 )
 
+# cgo links Ollama's C++ code against the shared C++ runtime; ship it alongside
+# (the app sets LD_LIBRARY_PATH to its native lib dir).
+cp "$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" "$OUT/"
+
 echo "==> Checking binaries"
 READELF="$TC/llvm-readelf"
 for f in "$OUT"/*.so; do
@@ -69,6 +73,7 @@ for f in "$OUT"/*.so; do
   for lib in $needed; do
     case "$lib" in
     libc.so | libm.so | libdl.so | liblog.so) ;;
+    libc++_shared.so) [ -f "$OUT/libc++_shared.so" ] || { echo "ERROR: libc++_shared.so missing" >&2; exit 1; } ;;
     *) echo "ERROR: $(basename "$f") depends on $lib, which Android does not provide" >&2; exit 1 ;;
     esac
   done
