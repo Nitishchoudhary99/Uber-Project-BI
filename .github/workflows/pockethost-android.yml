@@ -1,0 +1,45 @@
+name: PocketHost Android
+
+on:
+  push:
+    paths: ["pockethost/**", ".github/workflows/pockethost-android.yml"]
+  pull_request:
+    paths: ["pockethost/**", ".github/workflows/pockethost-android.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Termux scripts
+        run: |
+          bash -n pockethost/termux/pockethost.sh
+          bash -n pockethost/termux/install.sh
+          node --check pockethost/termux/gateway.js
+          shellcheck -S warning pockethost/termux/*.sh
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APKs
+        working-directory: pockethost/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug assembleRelease
+
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          cp pockethost/android/app/build/outputs/apk/debug/app-debug.apk out/PocketHost-debug.apk
+          cp pockethost/android/app/build/outputs/apk/release/app-release.apk out/PocketHost.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketHost-apk
+          path: out/*.apk
