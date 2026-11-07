@@ -2,8 +2,15 @@ package dev.pockethost
 
 import android.app.Application
 import android.content.Context
+import android.os.PowerManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.pockethost.server.AppConfig
+import dev.pockethost.server.ServerService
+import dev.pockethost.server.ServerSnapshot
+import dev.pockethost.server.ServerState
+import dev.pockethost.server.SvcStatus
+import dev.pockethost.server.TunnelMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -14,46 +21,45 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-enum class Health { OFFLINE, STARTING, ONLINE, DEGRADED, STOPPING, INSTALLING }
+enum class Health { OFFLINE, STARTING, ONLINE, DEGRADED }
 
-enum class PendingKind(val timeoutMs: Long) { START(240_000), STOP(30_000), INSTALL(45 * 60_000) }
-
-data class Pending(val kind: PendingKind, val since: Long = System.currentTimeMillis())
+data class Settings(
+    val tunnelMode: TunnelMode = TunnelMode.QUICK,
+    val hasToken: Boolean = false,
+    val publicUrl: String = "",
+    val autoStart: Boolean = false,
+    val keepAlive: String = "5m",
+)
 
 data class UiState(
     val setupDone: Boolean = false,
-    val termuxInstalled: Boolean = false,
-    val bootInstalled: Boolean = false,
-    val hasPermission: Boolean = false,
-    val status: ServerStatus? = null,
-    val ollamaUp: Boolean = false,
-    val n8nUp: Boolean = false,
+    val engineBundled: Boolean = true,
+    val server: ServerSnapshot = ServerSnapshot(),
+    val apiKey: String = "",
+    val settings: Settings = Settings(),
     val models: List<LocalModel> = emptyList(),
     val loaded: Set<String> = emptySet(),
     val pulls: Map<String, PullProgress> = emptyMap(),
     val device: DeviceStats = DeviceStats(),
-    val pending: Pending? = null,
+    val batteryUnrestricted: Boolean = false,
     val message: String? = null,
-    val firstPollDone: Boolean = false,
 ) {
+    val ollamaUp: Boolean get() = server.status(ServerState.OLLAMA) == SvcStatus.RUNNING
+
     val health: Health
         get() {
-            val s = status
-            pending?.let {
-                return when (it.kind) {
-                    PendingKind.INSTALL -> Health.INSTALLING
-                    PendingKind.STOP -> Health.STOPPING
-                    PendingKind.START -> Health.STARTING
-                }
+            if (!server.active) return Health.OFFLINE
+            val st = ServerState.SERVICES.map { server.status(it) }.filter { it != SvcStatus.DISABLED }
+            return when {
+                st.all { it == SvcStatus.RUNNING } -> Health.ONLINE
+                st.any { it == SvcStatus.CRASHED } && ollamaUp -> Health.DEGRADED
+                st.any { it == SvcStatus.CRASHED } && server.startedAt?.let { System.currentTimeMillis() - it > 60_000 } == true -> Health.DEGRADED
+                else -> Health.STARTING
             }
-            if (s == null) return Health.OFFLINE
-            val wanted = listOf("ollama", "n8n", "tunnel").filter { s.enabled(it) }
-            val n8nOk = !s.enabled("n8n") || n8nUp
-            return if (wanted.all { s.running(it) } && n8nOk) Health.ONLINE else Health.DEGRADED
         }
 
-    /** Public URL if there is a tunnel, else the local gateway. */
-    val baseUrl: String get() = status?.publicUrl ?: Api.GATEWAY
+    /** Public URL if the tunnel is up, else the local gateway. */
+    val baseUrl: String get() = server.publicUrl ?: Api.GATEWAY
 }
 
 data class ChatMessage(val role: String, val content: String)
@@ -68,9 +74,9 @@ data class ChatState(
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val ctx: Context get() = getApplication()
-    private val prefs = app.getSharedPreferences("pockethost", Context.MODE_PRIVATE)
+    private val cfg = AppConfig(app)
 
-    private val _ui = MutableStateFlow(UiState(setupDone = prefs.getBoolean(KEY_SETUP, false)))
+    private val _ui = MutableStateFlow(UiState(setupDone = cfg.setupDone, engineBundled = ServerService.engineBundled(app)))
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private val _chat = MutableStateFlow(ChatState())
@@ -80,110 +86,74 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val pullJobs = mutableMapOf<String, Job>()
 
     init {
+        loadSettings()
+        viewModelScope.launch { ServerState.snapshot.collect { s -> _ui.update { it.copy(server = s) } } }
         viewModelScope.launch {
             while (isActive) {
                 refresh()
-                delay(if (_ui.value.pending != null) 1500 else 3000)
+                delay(3000)
             }
         }
     }
 
+    private fun loadSettings() = _ui.update {
+        it.copy(
+            apiKey = cfg.apiKey,
+            settings = Settings(cfg.tunnelMode, cfg.tunnelToken.isNotBlank(), cfg.publicUrl, cfg.autoStart, cfg.keepAlive),
+        )
+    }
+
     suspend fun refresh() {
-        val status = Api.status()
-        val ollamaUp = status?.running("ollama") == true || Api.ollamaVersion() != null
-        val n8nUp = status?.running("n8n") == true && n8nHealthy()
-        val models = if (ollamaUp) Api.models() else emptyList()
-        val loaded = if (ollamaUp) Api.loaded() else emptySet()
-        _ui.update { s ->
-            s.copy(
-                termuxInstalled = Termux.isInstalled(ctx),
-                bootInstalled = Termux.isInstalled(ctx, Termux.BOOT_PACKAGE),
-                hasPermission = Termux.hasPermission(ctx),
-                status = status,
-                ollamaUp = ollamaUp,
-                n8nUp = n8nUp,
+        val up = _ui.value.ollamaUp
+        val models = if (up) Api.models() else emptyList()
+        val loaded = if (up) Api.loaded() else emptySet()
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+        _ui.update {
+            it.copy(
                 models = models,
                 loaded = loaded,
                 device = DeviceStats.read(ctx),
-                pending = s.pending?.takeUnless { p -> p.isDone(status, n8nUp) },
-                firstPollDone = true,
+                batteryUnrestricted = pm.isIgnoringBatteryOptimizations(ctx.packageName),
             )
         }
-        // Once the gateway answers, the install obviously worked.
-        if (status != null && !_ui.value.setupDone) markSetupDone()
-    }
-
-    private fun Pending.isDone(status: ServerStatus?, n8nUp: Boolean): Boolean {
-        if (System.currentTimeMillis() - since > kind.timeoutMs) return true
-        return when (kind) {
-            PendingKind.STOP -> status == null
-            PendingKind.INSTALL -> status != null
-            PendingKind.START -> status != null &&
-                listOf("ollama", "tunnel").filter { status.enabled(it) }.all { status.running(it) } &&
-                (!status.enabled("n8n") || n8nUp)
-        }
-    }
-
-    private suspend fun n8nHealthy(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        runCatching {
-            val c = java.net.URL("${Api.N8N_LOCAL}/healthz").openConnection() as java.net.HttpURLConnection
-            c.connectTimeout = 1000; c.readTimeout = 2000
-            try { c.responseCode == 200 } finally { c.disconnect() }
-        }.getOrDefault(false)
     }
 
     // ---------- setup ----------
 
-    fun markSetupDone(done: Boolean = true) {
-        prefs.edit().putBoolean(KEY_SETUP, done).apply()
+    fun finishSetup(done: Boolean = true) {
+        cfg.setupDone = done
         _ui.update { it.copy(setupDone = done) }
     }
 
-    fun install(autostart: Boolean, skipN8n: Boolean) {
-        val r = Termux.run(ctx, Termux.installScript(ctx, autostart, skipN8n), background = false, label = "Install PocketHost")
-        report(r) {
-            _ui.update { it.copy(pending = Pending(PendingKind.INSTALL)) }
-            viewModelScope.launch { delay(600); Termux.open(ctx) }
-        }
+    // ---------- server ----------
+
+    fun start() = ServerService.start(ctx)
+    fun stop() = ServerService.stop(ctx)
+    fun restart() = if (_ui.value.server.active) ServerService.restart(ctx) else ServerService.start(ctx)
+
+    fun saveTunnel(mode: TunnelMode, token: String?, publicUrl: String) {
+        cfg.tunnelMode = mode
+        if (!token.isNullOrBlank()) cfg.tunnelToken = token.trim()
+        cfg.publicUrl = publicUrl
+        loadSettings()
+        applyIfRunning()
     }
 
-    // ---------- server control ----------
+    fun setAutoStart(on: Boolean) { cfg.autoStart = on; loadSettings() }
 
-    fun start() = report(Termux.cli(ctx, "start")) {
-        _ui.update { it.copy(pending = Pending(PendingKind.START)) }
-        MonitorService.start(ctx)
+    fun setKeepAlive(v: String) { cfg.keepAlive = v; loadSettings(); applyIfRunning() }
+
+    fun rotateKey() {
+        cfg.rotateApiKey()
+        loadSettings()
+        toast("New API key active. Update your apps.")
     }
 
-    fun stop() = report(Termux.cli(ctx, "stop")) {
-        _ui.update { it.copy(pending = Pending(PendingKind.STOP)) }
-        MonitorService.stop(ctx)
+    private fun applyIfRunning() {
+        if (_ui.value.server.active) { ServerService.restart(ctx); toast("Saved. Restarting server...") } else toast("Saved")
     }
 
-    fun restart() = report(Termux.cli(ctx, "restart")) {
-        _ui.update { it.copy(pending = Pending(PendingKind.START)) }
-        MonitorService.start(ctx)
-    }
-
-    /** Applies config changes; restarts the server if it is running. */
-    fun applyConfig(changes: Map<String, String>) {
-        val cmds = changes.map { (k, v) -> "${Termux.CLI} config set ${Termux.shellQuote(k)} ${Termux.shellQuote(v)}" }
-        val running = _ui.value.status != null
-        val script = (cmds + if (running) listOf("${Termux.CLI} restart") else emptyList()).joinToString(" && ")
-        report(Termux.run(ctx, script, true, "pockethost config")) {
-            if (running) _ui.update { it.copy(pending = Pending(PendingKind.START)) }
-            toast(if (running) "Saved. Restarting server..." else "Saved")
-        }
-    }
-
-    fun setBoot(on: Boolean) = report(Termux.cli(ctx, "boot", if (on) "on" else "off")) {
-        toast(if (on) "Will start on boot" else "Boot start disabled")
-    }
-
-    fun rotateKey() = report(Termux.cli(ctx, "rotate-key")) { toast("New API key generated. Update your clients.") }
-
-    fun doctor() = report(Termux.cliVisible(ctx, "doctor"))
-
-    fun logs(service: String) = report(Termux.cliVisible(ctx, "logs", service))
+    fun logs(service: String): List<String> = ServerState.logs(service)
 
     // ---------- models ----------
 
@@ -215,10 +185,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteModel(name: String) {
-        if (!MODEL_NAME.matches(name)) return
-        report(Termux.cli(ctx, "rm", name)) {
-            toast("Deleting $name")
-            viewModelScope.launch { delay(2500); refresh() }
+        viewModelScope.launch {
+            toast(if (Api.deleteModel(name)) "Deleted $name" else "Could not delete $name")
+            refresh()
         }
     }
 
@@ -269,12 +238,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun toast(msg: String) = _ui.update { it.copy(message = msg) }
     fun consumeMessage() = _ui.update { it.copy(message = null) }
 
-    private inline fun report(r: Result<Unit>, onOk: () -> Unit = {}) {
-        r.onSuccess { onOk() }.onFailure { toast(it.message ?: "Could not reach Termux") }
-    }
-
     companion object {
-        private const val KEY_SETUP = "setup_done"
         val MODEL_NAME = Regex("^[A-Za-z0-9._:/-]+$")
     }
 }

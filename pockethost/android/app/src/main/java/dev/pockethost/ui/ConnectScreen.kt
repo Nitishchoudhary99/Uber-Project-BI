@@ -14,9 +14,8 @@ import dev.pockethost.UiState
 
 @Composable
 fun ConnectScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
-    val st = ui.status
     val base = ui.baseUrl
-    val key = st?.apiKey ?: "<your API key>"
+    val key = ui.apiKey
     val model = ui.models.firstOrNull()?.name ?: "gemma3:1b"
     val copied: (String) -> Unit = { vm.toast("$it copied") }
 
@@ -26,17 +25,29 @@ fun ConnectScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
     ) {
         item { Text("Connect", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(vertical = 8.dp)) }
 
-        if (st == null) {
-            item { SectionCard(title = "Server is offline", subtitle = "Start it on the Home tab to get your live endpoints.") {} }
-        } else if (st.publicUrl == null) {
-            item { SectionCard(title = "Local only", subtitle = "The tunnel is off, so these work only on this phone. Turn it on in Settings.") {} }
+        if (!ui.server.active) {
+            item { SectionCard(title = "Server is offline", subtitle = "Start it on the Home tab to get your live public URL.") {} }
+        } else if (ui.server.publicUrl == null) {
+            item { SectionCard(title = "No public URL yet", subtitle = "The tunnel is starting or turned off (Settings). Until then these work only on this phone.") {} }
         }
 
         item {
-            SectionCard(title = "OpenAI-compatible API", subtitle = "Works with any app or SDK that supports OpenAI: LangChain, Flowise, Open WebUI, Cursor, Continue, your own code.") {
-                CopyField("Base URL", "$base/ollama/v1", onCopied = copied)
-                CopyField("API key", key, secret = st?.apiKey != null, onCopied = copied)
+            SectionCard(title = "OpenAI-compatible API", subtitle = "Works with any app or SDK that speaks OpenAI: n8n, LangChain, Flowise, Open WebUI, Cursor, Continue, your own code.") {
+                CopyField("Base URL", "$base/v1", onCopied = copied)
+                CopyField("API key", key, secret = true, onCopied = copied)
                 CopyField("Model", model, onCopied = copied)
+            }
+        }
+
+        item {
+            SectionCard(title = "n8n (cloud, Docker or PC)", subtitle = "Use your phone as the AI brain for any n8n instance.") {
+                Text(
+                    "Credentials → New → OpenAI\n" +
+                        "• API Key: your key above\n" +
+                        "• Base URL: $base/v1\n" +
+                        "Then use the OpenAI Chat Model / AI Agent nodes with model \"$model\".",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
         }
 
@@ -44,7 +55,7 @@ fun ConnectScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
             SectionCard(title = "Test from any computer") {
                 CodeBlock(
                     """
-                    curl $base/ollama/v1/chat/completions \
+                    curl $base/v1/chat/completions \
                       -H "Authorization: Bearer $key" \
                       -H "Content-Type: application/json" \
                       -d '{"model":"$model","messages":[{"role":"user","content":"Hello from my phone server!"}]}'
@@ -58,7 +69,7 @@ fun ConnectScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
                 CodeBlock(
                     """
                     from openai import OpenAI
-                    client = OpenAI(base_url="$base/ollama/v1", api_key="$key")
+                    client = OpenAI(base_url="$base/v1", api_key="$key")
                     r = client.chat.completions.create(
                         model="$model",
                         messages=[{"role": "user", "content": "Hi!"}],
@@ -70,26 +81,18 @@ fun ConnectScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
         }
 
         item {
-            SectionCard(title = "Native Ollama API", subtitle = "For tools with an Ollama integration (n8n Ollama node, Open WebUI, etc.). Send the key as a Bearer token.") {
-                CopyField("Ollama URL", "$base/ollama", onCopied = copied)
-                Text("Inside n8n on this phone use http://127.0.0.1:11434 - no key needed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-
-        item {
-            SectionCard(title = "n8n", subtitle = "Open the editor once with the key link - it remembers you for 30 days. Webhooks are public so other services can call them.") {
-                CopyField("Editor (with key)", "$base/?key=$key", secret = false, onCopied = copied)
-                CopyField("Webhook base", "$base/webhook/", onCopied = copied)
-                CopyField("Form base", "$base/form/", onCopied = copied)
+            SectionCard(title = "Native Ollama API", subtitle = "For tools with an Ollama integration. Send the key as a Bearer token.") {
+                CopyField("Ollama URL", base, onCopied = copied)
+                Text("Apps on this phone can also use http://127.0.0.1:11434 directly, no key needed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         item {
             SectionCard(title = "Security") {
                 Text(
-                    "• Everything except n8n webhooks needs your API key.\n" +
-                        "• Ollama and n8n only listen on 127.0.0.1 - the gateway is the only door.\n" +
-                        "• Traffic is HTTPS end-to-end through Cloudflare. Your home IP is never exposed.\n" +
+                    "• Every request from the internet needs your API key.\n" +
+                        "• The AI engine only listens on 127.0.0.1 - the gateway is the only door.\n" +
+                        "• HTTPS end-to-end through Cloudflare. Your IP address is never exposed.\n" +
                         "• Leaked the key? Settings → Rotate API key.",
                     style = MaterialTheme.typography.bodyMedium,
                 )

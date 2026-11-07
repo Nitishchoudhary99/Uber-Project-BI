@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
                     if (!ui.setupDone) {
                         SetupScreen(ui, vm, padding)
                     } else when (tab) {
-                        0 -> HomeScreen(ui, vm, padding, onOpenSettings = { tab = 4 })
+                        0 -> HomeScreen(ui, vm, padding, onOpenSettings = { tab = 4 }, onOpenConnect = { tab = 3 })
                         1 -> ModelsScreen(ui, vm, padding)
                         2 -> ChatScreen(ui, chat, vm, padding)
                         3 -> ConnectScreen(ui, vm, padding)

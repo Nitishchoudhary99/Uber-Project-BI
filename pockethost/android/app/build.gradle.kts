@@ -13,7 +13,10 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "2.0.0"
+        // Versions of the bundled engines (passed by CI, see pockethost/native/build.sh)
+        buildConfigField("String", "OLLAMA_VERSION", "\"${project.findProperty("ollamaVersion") ?: "dev"}\"")
+        buildConfigField("String", "CLOUDFLARED_VERSION", "\"${project.findProperty("cloudflaredVersion") ?: "dev"}\"")
     }
 
     buildTypes {
@@ -36,9 +39,12 @@ android {
         compose = true
         buildConfig = true
     }
-    // The Termux scripts are bundled into the APK, so the app can install
-    // and update the server without downloading anything from GitHub.
-    sourceSets["main"].assets.srcDirs("src/main/assets", "../../termux")
+    // The engines (libollama.so, libcloudflared.so) are executables placed in
+    // src/main/jniLibs/arm64-v8a by pockethost/native/build.sh. They must be
+    // extracted to the native lib dir, the only place Android lets apps exec from.
+    packaging {
+        jniLibs.useLegacyPackaging = true
+    }
 }
 
 dependencies {

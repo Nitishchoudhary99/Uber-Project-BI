@@ -1,50 +1,63 @@
 # ⚡ PocketHost
 
-**Turn any Android phone into a public AI + automation server.**
-Ollama models, n8n workflows and a secure HTTPS URL, all controlled from one app and running on your own phone.
+**One Android app that turns your phone into a public AI server.**
+Ollama, a secure API gateway and a Cloudflare tunnel are all built into the APK. You don't need Termux, root, a PC or port forwarding.
 
 ```
-                   Internet (HTTPS)
-                         │
-              Cloudflare Tunnel (no port forwarding,
-              works on mobile data / CGNAT)
-                         │
-┌────────────────────────┼──────────── Android phone ─┐
-│  Termux                ▼                            │
-│   ┌──────────────────────────────┐                  │
-│   │ PocketHost gateway  :8080    │  API-key auth    │
-│   │  /ollama/*  → Ollama :11434  │  (OpenAI API)    │
-│   │  /webhook/* → n8n    :5678   │  public          │
-│   │  /*         → n8n editor     │  key + cookie    │
-│   └──────────────────────────────┘                  │
-│                                                     │
-│  PocketHost app ── RUN_COMMAND ──► pockethost CLI   │
-│   (start/stop, models, chat, endpoints, settings)   │
-└─────────────────────────────────────────────────────┘
+           Internet (HTTPS, works on mobile data / CGNAT)
+                              │
+┌─────────────────────────────┼──────────── PocketHost app ─┐
+│  Foreground service (wakelock, auto-restart, boot start)  │
+│                             ▼                             │
+│   libcloudflared.so ──► Gateway :8080 (Kotlin)            │
+│     (tunnel)              API-key auth, CORS, streaming   │
+│                             │                             │
+│                             ▼                             │
+│                  libollama.so serve :11434                │
+│                    (real Ollama, 127.0.0.1 only)          │
+│                                                           │
+│   UI: power button · models · chat · connect · settings   │
+└───────────────────────────────────────────────────────────┘
 ```
+
+## How it works without other apps
+
+Android lets an app execute binaries that ship inside its APK, as long as they sit in the app's native-library folder. So [`native/build.sh`](native/build.sh) cross-compiles the **real Ollama** and **cloudflared** with the Android NDK (static C++, no extra dependencies). The binaries are packaged as `libollama.so` and `libcloudflared.so`. The app's foreground service runs them as child processes and supervises them.
 
 ## Features
 
 | | |
 |---|---|
-| **One-tap server** | Starts Ollama, n8n, the gateway and the tunnel. The live status and URL stay in a notification. |
-| **Guided setup** | A 4-step wizard. The installer is bundled inside the APK, so nothing has to be fetched by hand. |
-| **Model manager** | A curated catalogue that checks your phone's RAM, shows download progress, and lets you pull any model from ollama.com. |
-| **On-device chat** | Test any model and see tokens/sec. Nothing leaves the phone. |
-| **OpenAI-compatible API** | `https://<url>/ollama/v1` with a Bearer key. Works with LangChain, Open WebUI, Cursor, Continue and the OpenAI SDKs. |
-| **n8n with public webhooks** | The editor is protected by the key. Webhook and form URLs are public and point at the correct domain automatically. |
-| **Your own domain** | Paste a Cloudflare tunnel token to get `https://ai.yourdomain.com`, or use a free quick tunnel. |
-| **Survives reboots** | Optional auto-start through Termux:Boot, plus a battery and phantom-process checklist. |
-| **Device health** | Shows battery, temperature (with a throttling warning), RAM and storage. |
-| **Security by default** | Services listen only on 127.0.0.1, the API key is checked in constant time, and the key can be rotated in one tap. |
+| **Single app** | Install the APK, tap Start, and the server runs. |
+| **Real Ollama** | The full Ollama API, any model from ollama.com, and its OpenAI-compatible endpoints. |
+| **Public HTTPS URL** | A free quick tunnel, or your own domain through a Cloudflare tunnel token. |
+| **Secure gateway** | Every request from the internet needs the API key (constant-time check, rotate in one tap). The engine listens only on 127.0.0.1. |
+| **Built to stay up 24/7** | Foreground service with wakelock and Wi-Fi lock. Crashed processes restart with backoff, and the server can start on boot. |
+| **Model manager** | A catalogue matched to your phone's RAM, with download progress and delete. |
+| **On-device chat** | Test models and see tokens/sec. |
+| **Connect screen** | A copy-ready base URL and key, plus snippets for curl, Python, n8n, LangChain and Open WebUI. |
+| **Live logs** | Tap any service to see its output. |
+| **Device health** | Battery, temperature (with a throttling warning), RAM and storage. |
 
 ## Install
 
-1. Download `PocketHost.apk` from the latest **GitHub Actions → PocketHost Android** run (artifact `PocketHost-apk`).
-2. Install **Termux** from [F-Droid](https://f-droid.org/packages/com.termux/). The Play Store build is outdated. Open it once.
-3. Open PocketHost and follow the wizard: grant permission → paste one line in Termux → **Install & start**.
+Download `PocketHost.apk` from the latest **Actions → PocketHost Android** run (artifact `PocketHost-apk`), install it and tap **Start my server**. It needs an arm64 phone running Android 8 or newer.
 
-The install takes 5–20 minutes, mostly because of n8n. Keep the phone charging.
+## API
+
+| Path | What |
+|---|---|
+| `/v1/...` | OpenAI-compatible (`/v1/chat/completions`, `/v1/models`, `/v1/embeddings`) |
+| `/api/...` | Native Ollama API (`/api/chat`, `/api/generate`, `/api/tags`…) |
+| `/health` | Readiness check, no key required |
+
+```bash
+curl https://<your-url>/v1/chat/completions \
+  -H "Authorization: Bearer <API key>" -H "Content-Type: application/json" \
+  -d '{"model":"gemma3:1b","messages":[{"role":"user","content":"Hello!"}]}'
+```
+
+**Using it from n8n** (cloud, Docker or PC): create an OpenAI credential, set Base URL to `https://<your-url>/v1`, and use your API key.
 
 ## Which models fit?
 
@@ -54,51 +67,21 @@ The install takes 5–20 minutes, mostly because of n8n. Keep the phone charging
 | 6–8 GB | `llama3.2:3b`, `qwen2.5:3b`, `qwen3:1.7b` |
 | 12 GB+ | `gemma3:4b`, `qwen3:4b`, `phi4-mini`, 7B q4 (slow) |
 
-Inference runs on the CPU. Expect roughly 5–20 tokens/sec for 1–3B models on a recent phone.
-
-## CLI (inside Termux)
+## Build
 
 ```bash
-pockethost start | stop | restart [service]
-pockethost status [--json]
-pockethost url | key | rotate-key
-pockethost pull gemma3:1b | rm <model> | models
-pockethost logs n8n -f
-pockethost config set TUNNEL token
-pockethost config set CF_TUNNEL_TOKEN <token>
-pockethost config set PUBLIC_URL https://ai.example.com
-pockethost boot on
-pockethost doctor
+# 1. engines (needs Go + Android NDK)
+ANDROID_NDK_HOME=/path/to/ndk bash pockethost/native/build.sh
+mkdir -p pockethost/android/app/src/main/jniLibs/arm64-v8a
+cp pockethost/native/out/arm64-v8a/*.so pockethost/android/app/src/main/jniLibs/arm64-v8a/
+# 2. app
+cd pockethost/android && ./gradlew assembleDebug
 ```
 
-## Use it
+CI does both steps on every push and caches the engines per version.
 
-```bash
-curl https://<your-url>/ollama/v1/chat/completions \
-  -H "Authorization: Bearer <API key>" -H "Content-Type: application/json" \
-  -d '{"model":"gemma3:1b","messages":[{"role":"user","content":"Hello!"}]}'
-```
+## Roadmap
 
-- **n8n editor:** open `https://<your-url>/?key=<API key>` once. A cookie keeps you signed in for 30 days.
-- **n8n webhooks:** `https://<your-url>/webhook/<path>`. These are public.
-- **Inside n8n:** use the Ollama credential with base URL `http://127.0.0.1:11434`.
-
-## Keeping it alive 24/7
-
-- Set Termux battery usage to **Unrestricted**.
-- On Android 12+, run this once from a PC:
-  `adb shell "settings put global settings_enable_monitor_phantom_procs false"`
-- Keep the phone plugged in and somewhere cool.
-
-## Project layout
-
-```
-pockethost/
-├── termux/            # runs on the phone (bundled into the APK as assets)
-│   ├── install.sh     # installs packages, n8n and the CLI
-│   ├── pockethost.sh  # the `pockethost` CLI / process manager
-│   └── gateway.js     # zero-dependency auth + reverse proxy
-└── android/           # Kotlin + Jetpack Compose app
-```
-
-Build locally with `cd pockethost/android && ./gradlew assembleDebug`. This needs the Android SDK, or you can open the folder in Android Studio.
+- **n8n inside the app.** This needs an embedded Node.js runtime built for Android, plus native modules. It is the next milestone. Until then, n8n anywhere can use the phone as its AI backend (see above).
+- Optimised CPU builds (ARMv8.2 dotprod/i8mm) with runtime detection, for 2–3× faster inference on newer phones.
+- LAN mode, so devices on the same Wi-Fi can connect without the tunnel.

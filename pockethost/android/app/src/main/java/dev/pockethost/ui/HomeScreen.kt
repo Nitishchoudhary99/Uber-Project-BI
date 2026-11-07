@@ -1,9 +1,5 @@
 package dev.pockethost.ui
 
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -18,28 +14,33 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.BatteryStd
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SdStorage
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Thermostat
-import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -47,23 +48,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import dev.pockethost.Api
+import androidx.compose.ui.unit.sp
 import dev.pockethost.DeviceStats
 import dev.pockethost.Health
 import dev.pockethost.MainViewModel
 import dev.pockethost.UiState
+import dev.pockethost.server.ServerState
+import dev.pockethost.server.SvcInfo
+import dev.pockethost.server.SvcStatus
+import dev.pockethost.server.TunnelMode
+import kotlinx.coroutines.delay
 
 @Composable
-fun HomeScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues, onOpenSettings: () -> Unit) {
+fun HomeScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues, onOpenSettings: () -> Unit, onOpenConnect: () -> Unit) {
     val ctx = LocalContext.current
-    val uri = LocalUriHandler.current
-    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.start() }
     val health = ui.health
-    val st = ui.status
+    val s = ui.server
+    var logsFor by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 24.dp),
@@ -76,55 +80,41 @@ fun HomeScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues, onOpenSet
             }
         }
 
-        if (!ui.hasPermission && ui.firstPollDone) {
-            item {
-                SectionCard(title = "Termux access missing", subtitle = "PocketHost cannot start or stop the server.") {
-                    Button(onClick = { vm.markSetupDone(false) }) { Text("Open setup") }
-                }
-            }
+        if (!ui.engineBundled) {
+            item { SectionCard(title = "AI engine missing", subtitle = "Install the APK built by GitHub Actions - it bundles Ollama and cloudflared.") {} }
         }
 
         item {
             SectionCard {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    PowerButton(health) {
-                        when (health) {
-                            Health.ONLINE, Health.DEGRADED, Health.STARTING -> vm.stop()
-                            Health.OFFLINE -> if (Build.VERSION.SDK_INT >= 33) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.start()
-                            else -> Unit
-                        }
-                    }
+                    PowerButton(health) { if (s.active) vm.stop() else vm.start() }
                     Text(
                         when (health) {
                             Health.ONLINE -> "Your phone is serving AI to the internet"
-                            Health.DEGRADED -> "Running, but some services are down"
-                            Health.STARTING -> "Starting services... n8n can take up to 2 minutes"
-                            Health.STOPPING -> "Stopping..."
-                            Health.INSTALLING -> "Installing in Termux - watch progress there"
+                            Health.DEGRADED -> "Running, but something needs attention"
+                            Health.STARTING -> "Starting the engine..."
                             Health.OFFLINE -> "Tap to start your server"
                         },
                         style = MaterialTheme.typography.titleMedium,
                         textAlign = TextAlign.Center,
                     )
-                    if (st != null) Text("v${st.version} · up ${formatUptime(st.uptimeSec)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    s.startedAt?.let { Text("Up ${formatUptime((System.currentTimeMillis() - it) / 1000)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
         }
 
-        if (st?.publicUrl != null) {
+        s.publicUrl?.let { url ->
             item {
-                val url = st.publicUrl
-                SectionCard(title = "Public URL", subtitle = if (st.config["TUNNEL"] == "quick") "Free quick tunnel - changes on every restart" else "Your permanent domain") {
-                    CopyField("Anyone with the API key can use it", url) { vm.toast("URL copied") }
+                SectionCard(
+                    title = "Public URL",
+                    subtitle = if (ui.settings.tunnelMode == TunnelMode.QUICK) "Free quick tunnel - changes on every restart" else "Your permanent domain",
+                ) {
+                    CopyField("Works from anywhere with your API key", url) { vm.toast("URL copied") }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(onClick = { shareText(ctx, "My PocketHost AI server:\n$url/ollama/v1\nAPI key: ${st.apiKey.orEmpty()}") }) {
+                        FilledTonalButton(onClick = { shareText(ctx, "My PocketHost AI server (OpenAI-compatible):\n$url/v1\nAPI key: ${ui.apiKey}") }) {
                             Icon(Icons.Rounded.Share, null, Modifier.size(18.dp)); Text("  Share")
                         }
-                        if (st.running("n8n")) {
-                            OutlinedButton(onClick = { uri.openUri("$url/?key=${st.apiKey.orEmpty()}") }) {
-                                Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(18.dp)); Text("  Open n8n")
-                            }
-                        }
+                        TextButton(onClick = onOpenConnect) { Text("How to connect") }
                     }
                 }
             }
@@ -132,36 +122,62 @@ fun HomeScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues, onOpenSet
 
         item {
             SectionCard(title = "Services") {
-                ServiceRow("Ollama", "AI models · :11434", st?.enabled("ollama") != false, ui.ollamaUp) { vm.logs("ollama") }
-                ServiceRow("n8n", "Automations · :5678", st?.enabled("n8n") != false, ui.n8nUp, starting = st?.running("n8n") == true && !ui.n8nUp) { vm.logs("n8n") }
-                ServiceRow("Gateway", "API key auth · :8080", true, st != null) { vm.logs("gateway") }
-                ServiceRow("Tunnel", "Cloudflare → internet", st?.enabled("tunnel") != false, st?.running("tunnel") == true) { vm.logs("tunnel") }
+                ServiceRow("Ollama", "AI engine · 127.0.0.1:11434", s.services[ServerState.OLLAMA], s.active) { logsFor = ServerState.OLLAMA }
+                ServiceRow("Gateway", "API key auth · 127.0.0.1:8080", s.services[ServerState.GATEWAY], s.active) { logsFor = ServerState.GATEWAY }
+                ServiceRow("Tunnel", "Cloudflare → internet", s.services[ServerState.TUNNEL], s.active) { logsFor = ServerState.TUNNEL }
                 Text("Tap a service to see its logs", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (st == null && !ui.ollamaUp) {
-                    TextButton(onClick = { uri.openUri(Api.GATEWAY + "/health") }) { Text("Local gateway: ${Api.GATEWAY}") }
-                }
             }
         }
 
         item { DeviceCard(ui.device) }
 
-        if (st?.config?.get("TUNNEL") == "quick" && health == Health.ONLINE) {
+        if (ui.settings.tunnelMode == TunnelMode.QUICK && health == Health.ONLINE) {
             item {
-                SectionCard(title = "Want a permanent address?", subtitle = "Connect a free Cloudflare tunnel with your own domain, e.g. ai.yourname.com") {
+                SectionCard(title = "Want a permanent address?", subtitle = "Connect a free Cloudflare tunnel to your own domain, e.g. ai.yourname.com") {
                     TextButton(onClick = onOpenSettings) { Text("Set up in Settings") }
                 }
             }
         }
     }
+
+    logsFor?.let { name -> LogsDialog(name, vm) { logsFor = null } }
+}
+
+@Composable
+private fun LogsDialog(name: String, vm: MainViewModel, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    var lines by remember { mutableStateOf(vm.logs(name)) }
+    val list = rememberLazyListState()
+    LaunchedEffect(name) {
+        while (true) {
+            lines = vm.logs(name)
+            if (lines.isNotEmpty()) list.scrollToItem(lines.lastIndex)
+            delay(1000)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("${name.replaceFirstChar { it.uppercase() }} logs") },
+        text = {
+            LazyColumn(state = list, modifier = Modifier.heightIn(max = 420.dp)) {
+                if (lines.isEmpty()) item { Text("No output yet.") }
+                items(lines) { Text(it, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp) }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
+        dismissButton = {
+            TextButton(onClick = { shareText(ctx, lines.joinToString("\n")) }) { Text("Share") }
+        },
+    )
 }
 
 @Composable
 private fun PowerButton(health: Health, onClick: () -> Unit) {
-    val busy = health == Health.STARTING || health == Health.STOPPING || health == Health.INSTALLING
     val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
         initialValue = 1f, targetValue = 0.35f,
         animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "alpha",
     )
+    val busy = health == Health.STARTING
     val color = health.color()
     Box(
         Modifier
@@ -169,7 +185,7 @@ private fun PowerButton(health: Health, onClick: () -> Unit) {
             .clip(CircleShape)
             .background(color.copy(alpha = 0.12f))
             .border(3.dp, color.copy(alpha = if (busy) pulse else 1f), CircleShape)
-            .clickable(enabled = health != Health.STOPPING && health != Health.INSTALLING, onClick = onClick),
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -182,12 +198,14 @@ private fun PowerButton(health: Health, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ServiceRow(name: String, detail: String, enabled: Boolean, up: Boolean, starting: Boolean = false, onClick: () -> Unit) {
-    val color = when {
-        !enabled -> Brand.Grey
-        up -> Brand.Green
-        starting -> Brand.Amber
-        else -> Brand.Red
+private fun ServiceRow(name: String, detail: String, info: SvcInfo?, active: Boolean, onClick: () -> Unit) {
+    val st = if (active) info?.status ?: SvcStatus.STARTING else SvcStatus.STOPPED
+    val (color, label) = when (st) {
+        SvcStatus.RUNNING -> Brand.Green to "Running"
+        SvcStatus.STARTING -> Brand.Amber to "Starting"
+        SvcStatus.CRASHED -> Brand.Red to "Error"
+        SvcStatus.DISABLED -> Brand.Grey to "Off"
+        SvcStatus.STOPPED -> Brand.Grey to "Stopped"
     }
     Row(
         Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable(onClick = onClick).padding(vertical = 6.dp),
@@ -197,12 +215,14 @@ private fun ServiceRow(name: String, detail: String, enabled: Boolean, up: Boole
         StatusDot(color)
         Column(Modifier.weight(1f)) {
             Text(name, style = MaterialTheme.typography.titleMedium)
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
+            Text(
+                info?.detail?.takeIf { active } ?: detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (st == SvcStatus.CRASHED) Brand.Red else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace,
+            )
         }
-        Text(
-            when { !enabled -> "Off"; up -> "Running"; starting -> "Booting"; else -> "Stopped" },
-            style = MaterialTheme.typography.labelLarge, color = color,
-        )
+        Text(label, style = MaterialTheme.typography.labelLarge, color = color)
     }
 }
 

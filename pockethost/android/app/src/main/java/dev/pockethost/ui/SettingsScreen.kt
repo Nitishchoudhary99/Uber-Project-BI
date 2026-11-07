@@ -1,5 +1,6 @@
 package dev.pockethost.ui
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -14,6 +15,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -38,28 +40,25 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.pockethost.BuildConfig
 import dev.pockethost.MainViewModel
-import dev.pockethost.Termux
 import dev.pockethost.UiState
+import dev.pockethost.server.TunnelMode
 
-private val TUNNEL_MODES = listOf("quick" to "Quick (free)", "token" to "Own domain", "none" to "Off")
+private val TUNNEL_MODES = listOf(TunnelMode.QUICK to "Quick (free)", TunnelMode.TOKEN to "Own domain", TunnelMode.NONE to "Off")
+private val KEEP_ALIVE = listOf("1m", "5m", "30m", "-1")
 
+@SuppressLint("BatteryLife")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
     val ctx = LocalContext.current
     val uri = LocalUriHandler.current
-    val cfg = ui.status?.config.orEmpty()
-    var mode by rememberSaveable { mutableStateOf(cfg["TUNNEL"] ?: "quick") }
+    val cfg = ui.settings
+    var mode by rememberSaveable { mutableStateOf(cfg.tunnelMode) }
     var token by rememberSaveable { mutableStateOf("") }
-    var domain by rememberSaveable { mutableStateOf(cfg["PUBLIC_URL"].orEmpty()) }
+    var domain by rememberSaveable { mutableStateOf(cfg.publicUrl) }
     var confirmRotate by remember { mutableStateOf(false) }
-    var confirmReinstall by remember { mutableStateOf(false) }
 
-    // Sync with the server once it reports its config.
-    LaunchedEffect(cfg["TUNNEL"], cfg["PUBLIC_URL"]) {
-        cfg["TUNNEL"]?.let { mode = it }
-        cfg["PUBLIC_URL"]?.let { domain = it }
-    }
+    LaunchedEffect(cfg.tunnelMode, cfg.publicUrl) { mode = cfg.tunnelMode; domain = cfg.publicUrl }
 
     LazyColumn(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 24.dp),
@@ -68,29 +67,29 @@ fun SettingsScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
         item { Text("Settings", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(vertical = 8.dp)) }
 
         item {
-            SectionCard(title = "Internet access", subtitle = "How the world reaches your phone. Mobile data works too - no port forwarding needed.") {
+            SectionCard(title = "Internet access", subtitle = "How the world reaches your phone. Works on Wi-Fi and mobile data, no port forwarding.") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    TUNNEL_MODES.forEachIndexed { i, (key, label) ->
+                    TUNNEL_MODES.forEachIndexed { i, (m, label) ->
                         SegmentedButton(
-                            selected = mode == key, onClick = { mode = key },
+                            selected = mode == m, onClick = { mode = m },
                             shape = SegmentedButtonDefaults.itemShape(i, TUNNEL_MODES.size),
                         ) { Text(label, maxLines = 1) }
                     }
                 }
                 when (mode) {
-                    "quick" -> Text("Random *.trycloudflare.com address, ready in seconds. Changes every restart.", style = MaterialTheme.typography.bodySmall)
-                    "none" -> Text("Only apps on this phone can reach the server.", style = MaterialTheme.typography.bodySmall)
-                    "token" -> {
+                    TunnelMode.QUICK -> Text("Random *.trycloudflare.com address, ready in seconds, no account. Changes every restart.", style = MaterialTheme.typography.bodySmall)
+                    TunnelMode.NONE -> Text("Only apps on this phone can reach the server.", style = MaterialTheme.typography.bodySmall)
+                    TunnelMode.TOKEN -> {
                         Text(
-                            "1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → Create tunnel\n" +
-                                "2. Add a public hostname (e.g. ai.yourdomain.com) → service http://127.0.0.1:8080\n" +
-                                "3. Copy the tunnel token and paste it here",
+                            "1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → Create tunnel (Cloudflared)\n" +
+                                "2. Public hostname, e.g. ai.yourdomain.com → service HTTP 127.0.0.1:8080\n" +
+                                "3. Copy the token from the install command and paste it here",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         TextButton(onClick = { uri.openUri("https://one.dash.cloudflare.com/") }) { Text("Open Cloudflare") }
                         OutlinedTextField(
                             value = token, onValueChange = { token = it.trim() },
-                            label = { Text(if (cfg["HAS_TUNNEL_TOKEN"] == "1") "Tunnel token (saved - paste to replace)" else "Tunnel token") },
+                            label = { Text(if (cfg.hasToken) "Tunnel token (saved - paste to replace)" else "Tunnel token") },
                             singleLine = true, visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -101,72 +100,55 @@ fun SettingsScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
                         )
                     }
                 }
-                val tokenOk = mode != "token" || token.isNotEmpty() || cfg["HAS_TUNNEL_TOKEN"] == "1"
-                val domainOk = mode != "token" || domain.isEmpty() || Regex("^https://[A-Za-z0-9.-]+/?$").matches(domain)
-                Button(enabled = tokenOk && domainOk, onClick = {
-                    val changes = linkedMapOf("TUNNEL" to mode)
-                    if (mode == "token") {
-                        if (token.isNotEmpty()) changes["CF_TUNNEL_TOKEN"] = token
-                        changes["PUBLIC_URL"] = domain.trimEnd('/')
-                    }
-                    vm.applyConfig(changes)
-                    token = ""
-                }) { Text("Save & apply") }
+                val tokenOk = mode != TunnelMode.TOKEN || token.isNotEmpty() || cfg.hasToken
+                val domainOk = mode != TunnelMode.TOKEN || domain.isEmpty() || Regex("^https://[A-Za-z0-9.-]+/?$").matches(domain)
+                Button(enabled = tokenOk && domainOk, onClick = { vm.saveTunnel(mode, token, domain); token = "" }) { Text("Save & apply") }
             }
         }
 
         item {
-            SectionCard(title = "Services") {
-                ToggleRow("Ollama (AI models)", cfg["ENABLE_OLLAMA"] != "0") { vm.applyConfig(mapOf("ENABLE_OLLAMA" to if (it) "1" else "0")) }
-                ToggleRow("n8n (automations)", cfg["ENABLE_N8N"] != "0") { vm.applyConfig(mapOf("ENABLE_N8N" to if (it) "1" else "0")) }
-                ToggleRow("Start when phone boots", cfg["BOOT"] == "1") { on ->
-                    if (on && !ui.bootInstalled) uri.openUri(Termux.BOOT_DOWNLOAD_URL)
-                    vm.setBoot(on)
+            SectionCard(title = "Engine") {
+                Text("Keep model in RAM after last request", style = MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KEEP_ALIVE.forEach { v ->
+                        FilterChip(selected = cfg.keepAlive == v, onClick = { vm.setKeepAlive(v) }, label = { Text(if (v == "-1") "Always" else v) })
+                    }
                 }
-                if (!ui.bootInstalled) {
-                    Text("Boot start needs the Termux:Boot app (from the same store as Termux). Open it once after installing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text("Shorter frees RAM for other apps; longer answers faster.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         item {
-            SectionCard(title = "Keep it running 24/7", subtitle = "Android aggressively kills background apps. Do all three.") {
-                FilledTonalButton(onClick = { Termux.openAppSettings(ctx, Termux.PACKAGE) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Termux → Battery → Unrestricted")
+            SectionCard(title = "Keep it running 24/7") {
+                ToggleRow("Start server when phone boots", cfg.autoStart) { vm.setAutoStart(it) }
+                if (!ui.batteryUnrestricted) {
+                    FilledTonalButton(onClick = {
+                        runCatching { ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))) }
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Allow running in background") }
+                } else {
+                    Text("✓ Background running allowed", color = Brand.Green, style = MaterialTheme.typography.bodyMedium)
                 }
-                FilledTonalButton(onClick = {
-                    runCatching {
-                        ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")))
-                    }
-                }, modifier = Modifier.fillMaxWidth()) { Text("Allow PocketHost in background") }
-                Text("Android 12+: if services die after a few minutes, run this once from a computer with USB debugging:", style = MaterialTheme.typography.bodySmall)
-                CodeBlock("adb shell \"settings put global settings_enable_monitor_phantom_procs false\"") { vm.toast("Copied") }
+                Text("On some phones (Xiaomi, Oppo, Vivo, Samsung) also enable \"Autostart\" and lock the app in recent apps.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         item {
             SectionCard(title = "Security") {
+                CopyField("API key", ui.apiKey, secret = true) { vm.toast("API key copied") }
                 OutlinedButton(onClick = { confirmRotate = true }, modifier = Modifier.fillMaxWidth()) { Text("Rotate API key") }
             }
         }
 
         item {
             SectionCard(title = "Maintenance") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(onClick = vm::restart, modifier = Modifier.weight(1f)) { Text("Restart") }
-                    FilledTonalButton(onClick = vm::doctor, modifier = Modifier.weight(1f)) { Text("Diagnose") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { Termux.open(ctx) }, modifier = Modifier.weight(1f)) { Text("Open Termux") }
-                    OutlinedButton(onClick = { confirmReinstall = true }, modifier = Modifier.weight(1f)) { Text("Update / repair") }
-                }
-                TextButton(onClick = { vm.markSetupDone(false) }) { Text("Run setup wizard again") }
+                FilledTonalButton(onClick = vm::restart, modifier = Modifier.fillMaxWidth()) { Text("Restart server") }
+                TextButton(onClick = { vm.finishSetup(false) }) { Text("Show welcome screen again") }
             }
         }
 
         item {
             Column(Modifier.fillMaxWidth().padding(8.dp)) {
-                Text("PocketHost app ${BuildConfig.VERSION_NAME}" + (ui.status?.version?.let { " · server $it" } ?: ""), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("PocketHost ${BuildConfig.VERSION_NAME} · Ollama ${BuildConfig.OLLAMA_VERSION} · cloudflared ${BuildConfig.CLOUDFLARED_VERSION}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -178,15 +160,6 @@ fun SettingsScreen(ui: UiState, vm: MainViewModel, padding: PaddingValues) {
             text = { Text("Every app, script and person using the old key loses access immediately.") },
             confirmButton = { TextButton(onClick = { vm.rotateKey(); confirmRotate = false }) { Text("Rotate") } },
             dismissButton = { TextButton(onClick = { confirmRotate = false }) { Text("Cancel") } },
-        )
-    }
-    if (confirmReinstall) {
-        AlertDialog(
-            onDismissRequest = { confirmReinstall = false },
-            title = { Text("Update / repair PocketHost?") },
-            text = { Text("Re-installs the server scripts and missing packages in Termux. Your models, n8n workflows and API key are kept.") },
-            confirmButton = { TextButton(onClick = { vm.install(autostart = ui.status != null, skipN8n = cfg["ENABLE_N8N"] == "0"); confirmReinstall = false }) { Text("Run") } },
-            dismissButton = { TextButton(onClick = { confirmReinstall = false }) { Text("Cancel") } },
         )
     }
 }

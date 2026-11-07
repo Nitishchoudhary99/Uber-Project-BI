@@ -68,7 +68,7 @@ fun StatusDot(color: Color, modifier: Modifier = Modifier) {
 fun Health.color(): Color = when (this) {
     Health.ONLINE -> Brand.Green
     Health.DEGRADED -> Brand.Amber
-    Health.STARTING, Health.STOPPING, Health.INSTALLING -> Brand.Indigo
+    Health.STARTING -> Brand.Indigo
     Health.OFFLINE -> Brand.Grey
 }
 
@@ -76,8 +76,6 @@ fun Health.label(): String = when (this) {
     Health.ONLINE -> "Online"
     Health.DEGRADED -> "Partly online"
     Health.STARTING -> "Starting"
-    Health.STOPPING -> "Stopping"
-    Health.INSTALLING -> "Installing"
     Health.OFFLINE -> "Offline"
 }
 
